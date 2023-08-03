@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature;
+namespace Api;
 
 // use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Models\Post;
@@ -19,6 +19,9 @@ class PostTest extends TestCase
     {
         parent::setUp();
         Storage::fake('local');
+        $this->withHeaders([
+            'accept' => 'application/json'
+        ]);
     }
 
     /** @test */
@@ -36,9 +39,9 @@ class PostTest extends TestCase
         ];
 
 
-        $response = $this->post('/posts', $data);
+        $response = $this->post('/api/posts', $data);
 
-        $response->assertOk();
+
 
         $this->assertDatabaseCount('posts', 1);
 
@@ -49,6 +52,13 @@ class PostTest extends TestCase
         $this->assertEquals('images/' . $file->hashName(), $post->image_url);
 
         Storage::disk('local')->assertExists($post->image_url);
+
+        $response->assertJson([
+            'id' => $post->id,
+            'title' => $post->title,
+            'description' => $post->description,
+            'image_url' => $post->image_url,
+        ]);
     }
 
 
@@ -61,9 +71,9 @@ class PostTest extends TestCase
             'image' => ''
         ];
 
-        $response = $this->post('/posts', $data);
+        $response = $this->post('/api/posts', $data);
 
-        $response->assertRedirect();
+        $response->assertStatus(422);
         $response->assertInvalid('title');
 
     }
@@ -80,9 +90,11 @@ class PostTest extends TestCase
 
         $response = $this->post('/posts', $data);
 
-        $response->assertRedirect();
+        $response->assertStatus(422);
         $response->assertInvalid('image');
-
+        $response->assertJsonValidationErrors([
+            'image' => 'The image field must be a file.'
+        ]);
     }
 
 
@@ -100,17 +112,16 @@ class PostTest extends TestCase
             'image' => $file
         ];
 
-        $response = $this->patch('/posts/' . $post->id, $data);
+        $response = $this->patch('/api/posts/' . $post->id, $data);
 
-        $response->assertOk();
-
-        $updatedPost = Post::first();
-        $this->assertEquals($data['title'], $updatedPost->title);
-        $this->assertEquals($data['description'], $updatedPost->description);
-        $this->assertEquals('images/' . $file->hashName(), $updatedPost->image_url);
-
-        $this->assertEquals($post->id, $updatedPost->id);
+        $response->assertJson([
+            'id' => $post->id,
+            'title' => $data['title'],
+            'description' => $data['description'],
+            'image_url' => 'images/' . $file->hashName(),
+        ]);
     }
+
 
     /** @test */
     public function response_for_route_posts_index_is_view_post_index_with_posts()
@@ -119,16 +130,21 @@ class PostTest extends TestCase
 
         $posts = Post::factory(10)->create();
 
-        $response = $this->get('/posts');
+        $response = $this->get('/api/posts');
 
-        $response->assertViewIs('posts.index');
+        $response->assertOk();
 
-        $response->assertSeeText('View page');
+        $json = $posts->map(function ($post) {
+            return [
+                'id' => $post->id,
+                'title' => $post->title,
+                'description' => $post->description,
+                'image_url' => $post->image_url,
+            ];
+        })->toArray();
 
-        $titles = $posts->pluck('title')->toArray();
-        $response->assertSeeText($titles);
+        $response->assertExactJson($json);
     }
-
 
     /** @test */
     public function response_for_route_posts_show_is_view_post_show_with_single_post()
@@ -136,30 +152,32 @@ class PostTest extends TestCase
         $this->withoutExceptionHandling();
         $post = Post::factory()->create();
 
-        $response = $this->get('/posts/' . $post->id);
+        $response = $this->get('/api/posts/' . $post->id);
 
-        $response->assertViewIs('posts.show');
-        $response->assertSeeText('Show page');
-        $response->assertSeeText($post->title);
-        $response->assertSeeText($post->descritption);
+        $response->assertJson([
+            'id' => $post->id,
+            'title' => $post->title,
+            'description' => $post->description,
+            'image_url' => $post->image_url,
+        ]);
     }
 
     /** @test */
     public function a_post_can_be_deleted_by_auth_user()
     {
         $this->withoutExceptionHandling();
-
         $user = User::factory()->create();
-
         $post = Post::factory()->create();
-
-        $response  = $this->actingAs($user)->delete('/posts/' . $post->id);
+        $response  = $this->actingAs($user)->delete('/api/posts/' . $post->id);
 
         $response->assertOk();
 
 
         $this->assertDatabaseCount('posts', 0);
 
+        $response->assertJson([
+            'message' => 'deleted',
+        ]);
     }
 
     /** @test */
@@ -168,38 +186,10 @@ class PostTest extends TestCase
 
         $post = Post::factory()->create();
 
-        $response  = $this->delete('/posts/' . $post->id);
+        $response  = $this->delete('/api/posts/' . $post->id);
 
-        $response->assertRedirect();
+        $response->assertUnauthorized();
 
         $this->assertDatabaseCount('posts', 1);
     }
-    /** @test */
-    public function response_for_route_posts_edit_is_view_post_edit_with_post_editing()
-    {
-        $this->withoutExceptionHandling();
-        $post = Post::factory()->create();
-        $response = $this->get('/posts/' . $post->id . '/edit');
-
-        $response->assertViewIs('posts.edit');
-        $response->assertSeeText('Edit page');
-        $response->assertSeeText($post->title);
-        $response->assertSeeText($post->description);
-        $response->assertSeeText($post->image_url);
-
-    }
-
-    /** @test */
-    public function response_for_route_posts_create_is_view_post_create_with_post_creating()
-    {
-        $this->withoutExceptionHandling();
-
-        $response = $this->get('/posts/create');
-
-        $response->assertViewIs('posts.create');
-
-        $response->assertSeeText('This is post create page');
-
-    }
-
 }
